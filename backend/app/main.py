@@ -19,7 +19,13 @@ logger = logging.getLogger("rag-backend")
 
 
 class Settings(BaseSettings):
-    """Centralized runtime settings loaded from environment variables."""
+    """Centralized runtime settings loaded from environment variables.
+
+    This class maps environment variables to typed Python attributes so the
+    application can rely on validated, strongly-typed configuration values.
+    Values are read once at startup from process env vars and optional `.env`
+    files.
+    """
 
     model_config = SettingsConfigDict(
         # Load from .env when present (useful for local runs), while still
@@ -62,13 +68,23 @@ class Settings(BaseSettings):
 
 
 class ChatRequest(BaseModel):
-    """Request payload accepted by /chat."""
+    """Request payload accepted by `/chat`.
+
+    Fields:
+    - query: end-user natural language question.
+    """
 
     query: str
 
 
 class ChatResponse(BaseModel):
-    """Structured response returned by /chat."""
+    """Structured response returned by `/chat`.
+
+    Fields:
+    - answer: model-generated answer text.
+    - augmented_query: rewritten query used for vector search.
+    - sources: unique list of source files used in retrieved context.
+    """
 
     answer: str
     augmented_query: str
@@ -81,7 +97,12 @@ app = FastAPI(title="Simple RAG Backend", version="1.0.0")
 
 
 def _mask(value: str, reveal: int = 2) -> str:
-    """Mask sensitive values before writing them to logs."""
+    """Mask sensitive values before writing them to logs.
+
+    Example:
+    - input: `abcdef`, reveal=2
+    - output: `****ef`
+    """
     if not value:
         return ""
     if len(value) <= reveal:
@@ -90,7 +111,11 @@ def _mask(value: str, reveal: int = 2) -> str:
 
 
 def log_loaded_settings() -> None:
-    """Log effective runtime configuration loaded from env/.env."""
+    """Log effective runtime configuration loaded from env/.env.
+
+    Sensitive values (passwords/API keys) are masked before logging.
+    This helps with startup diagnostics without exposing secrets.
+    """
     logger.info("Loaded settings:")
     logger.info("  POSTGRES_HOST=%s", settings.postgres_host)
     logger.info("  POSTGRES_PORT=%s", settings.postgres_port)
@@ -150,7 +175,10 @@ SUPPORTED_EXTENSIONS = {
 
 
 def _read_pdf(path: Path) -> str:
-    """Extract text from all pages of a PDF file."""
+    """Extract text from all pages of a PDF file.
+
+    Returns one concatenated string that preserves page order.
+    """
 
     from pypdf import PdfReader
 
@@ -172,10 +200,23 @@ def _read_docx(path: Path) -> str:
 
 
 def _sanitize_text(text: str) -> str:
-    """Normalize and remove problematic Unicode control chars for embeddings."""
+    """Normalize and clean text before embedding.
+
+    Why this exists:
+    - Some embedding backends reject specific control/surrogate characters.
+    - Normalization makes text representation more consistent.
+
+    Behavior:
+    - Apply Unicode NFKC normalization.
+    - Keep newline/carriage-return/tab.
+    - Drop other Unicode category `C*` control-like chars.
+    - Trim each line.
+    """
 
     normalized = unicodedata.normalize("NFKC", text)
     cleaned_chars: list[str] = []
+    # Character-by-character clean-up keeps line structure but removes
+    # problematic control characters for downstream tokenization.
     for ch in normalized:
         if ch in {"\n", "\r", "\t"}:
             cleaned_chars.append(ch)
@@ -194,7 +235,10 @@ def _sanitize_text(text: str) -> str:
 
 
 def _ascii_fallback_text(text: str) -> str:
-    """Reduce text to ASCII-safe content for strict embedding backends."""
+    """Reduce text to ASCII-safe content for strict embedding backends.
+
+    This fallback is used when a chunk fails to embed due to tokenizer errors.
+    """
 
     ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     # Collapse excessive whitespace while preserving paragraph breaks.
@@ -203,13 +247,22 @@ def _ascii_fallback_text(text: str) -> str:
 
 
 def load_documents(directory: str) -> list[Document]:
-    """Read supported files from a directory tree into LangChain Documents."""
+    """Load supported files recursively from `directory` into Documents.
+
+    File handling strategy:
+    - `.pdf` -> page text extraction
+    - `.docx` -> paragraph extraction
+    - others -> UTF-8 text read with ignore errors
+
+    Each loaded item carries metadata with relative and absolute paths.
+    """
 
     root = Path(directory)
     if not root.exists() or not root.is_dir():
         raise ValueError(f"Data directory does not exist or is not a folder: {directory}")
 
     documents: list[Document] = []
+    # Walk every file recursively under the configured corpus root.
     for file_path in root.rglob("*"):
         if not file_path.is_file():
             continue
@@ -217,6 +270,7 @@ def load_documents(directory: str) -> list[Document]:
             continue
 
         try:
+            # Route by extension so each format uses an appropriate extractor.
             if file_path.suffix.lower() == ".pdf":
                 content = _read_pdf(file_path)
             elif file_path.suffix.lower() == ".docx":
@@ -244,7 +298,11 @@ def load_documents(directory: str) -> list[Document]:
 
 
 def split_documents(documents: list[Document]) -> list[Document]:
-    """Chunk large documents into retrieval-friendly pieces."""
+    """Split documents into overlapping chunks for vector retrieval.
+
+    Chunking improves semantic search quality by indexing focused text regions
+    instead of entire files.
+    """
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
@@ -254,7 +312,14 @@ def split_documents(documents: list[Document]) -> list[Document]:
 
 
 def _add_documents_resilient(chunks: list[Document], batch_size: int = 16) -> tuple[int, int]:
-    """Add chunks to PGVector while skipping chunks rejected by embedding backend."""
+    """Add chunks to PGVector with fallback handling for embed failures.
+
+    Strategy:
+    1) Try batch insert for throughput.
+    2) If batch fails, retry each chunk individually.
+    3) If individual chunk fails due to invalid tokens, retry with ASCII fallback.
+    4) Track added vs skipped counts for observability.
+    """
 
     if _vector_store is None:
         raise RuntimeError("Vector store is not initialized")
@@ -262,6 +327,7 @@ def _add_documents_resilient(chunks: list[Document], batch_size: int = 16) -> tu
     added = 0
     skipped = 0
 
+    # Process in batches for efficiency while retaining granular recovery paths.
     for start in range(0, len(chunks), batch_size):
         batch = chunks[start : start + batch_size]
         try:
@@ -319,11 +385,17 @@ def _add_documents_resilient(chunks: list[Document], batch_size: int = 16) -> tu
 
 
 def _ensure_initialized(force_reingest: bool = False) -> None:
-    """Initialize models/vector store and ingest data when needed."""
+    """Initialize runtime dependencies and ingest corpus when needed.
+
+    This method is idempotent under a lock:
+    - First call initializes embeddings/LLMs/vector store and ingests data.
+    - Later calls return quickly unless `force_reingest=True`.
+    """
 
     global _initialized, _init_error
     global _embeddings, _query_llm, _answer_llm, _vector_store
 
+    # Lock protects shared globals from concurrent startup/chat/ingest access.
     with _state_lock:
         if _initialized and not force_reingest:
             return
@@ -378,7 +450,10 @@ def _ensure_initialized(force_reingest: bool = False) -> None:
 
 
 def _expand_query(user_query: str) -> str:
-    """Use a small LLM call to rewrite user input for better retrieval recall."""
+    """Rewrite user query for improved semantic retrieval recall.
+
+    If rewriting fails or returns empty content, the original query is used.
+    """
 
     if _query_llm is None:
         return user_query
@@ -397,11 +472,16 @@ def _expand_query(user_query: str) -> str:
 
 
 def _merge_retrieval_results(primary: list[Document], secondary: list[Document], k: int) -> list[Document]:
-    """Merge two ranked retrieval lists while removing duplicate chunks."""
+    """Merge two ranked retrieval lists and remove near-duplicate entries.
+
+    Dedup key uses `(source, first_200_chars)` as a lightweight stable identity.
+    This preserves ranking while avoiding repeated chunks in answer context.
+    """
 
     merged: list[Document] = []
     seen: set[tuple[str, str]] = set()
 
+    # Keep ordering preference: `primary` results first, then `secondary` fill-ins.
     for doc in primary + secondary:
         key = (
             str(doc.metadata.get("source", "unknown")),
@@ -418,7 +498,11 @@ def _merge_retrieval_results(primary: list[Document], secondary: list[Document],
 
 
 def _answer_question(user_query: str, augmented_query: str, docs: list[Document]) -> str:
-    """Generate final answer grounded on retrieved document chunks."""
+    """Generate final answer grounded on retrieved document chunks.
+
+    The prompt explicitly includes both the original and augmented query plus
+    the retrieved context block to guide grounded generation.
+    """
 
     if _answer_llm is None:
         raise HTTPException(status_code=500, detail="Answer model is not initialized")
@@ -440,7 +524,7 @@ def _answer_question(user_query: str, augmented_query: str, docs: list[Document]
 
 @app.on_event("startup")
 def startup_ingest() -> None:
-    """Initialize vector store and run first ingestion when service starts."""
+    """FastAPI startup hook: initialize runtime and run initial ingestion."""
 
     global _init_error
     try:
@@ -453,7 +537,7 @@ def startup_ingest() -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    """Lightweight health endpoint with initialization state."""
+    """Health endpoint returning service and initialization state."""
 
     return {
         "status": "ok",
@@ -465,7 +549,10 @@ def health() -> dict[str, Any]:
 
 @app.post("/ingest")
 def ingest() -> dict[str, Any]:
-    """Manual endpoint to trigger re-ingestion from DATA_DIR."""
+    """Manual endpoint to force re-ingestion from `DATA_DIR`.
+
+    Useful after adding/modifying files in the mounted corpus directory.
+    """
 
     global _initialized
     try:
@@ -480,7 +567,15 @@ def ingest() -> dict[str, Any]:
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest) -> ChatResponse:
-    """RAG chat endpoint: expand query, retrieve context, generate answer."""
+    """RAG chat endpoint: expand query, retrieve context, generate answer.
+
+    Runtime flow:
+    1) Ensure runtime is initialized.
+    2) Build augmented query.
+    3) Retrieve top-k from original and augmented queries.
+    4) Merge/dedup retrieval outputs.
+    5) Generate grounded answer and return sources.
+    """
 
     try:
         _ensure_initialized(force_reingest=False)
@@ -501,6 +596,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     answer = _answer_question(payload.query, augmented_query, docs)
 
+    # Preserve unique source file list in response metadata.
     sources: list[str] = []
     for doc in docs:
         source = str(doc.metadata.get("source", "unknown"))
