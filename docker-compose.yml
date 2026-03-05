@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  # Postgres with pgvector extension enabled for semantic search storage.
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    # FastAPI + LangChain service: ingestion, retrieval, and chat responses.
+    build:
+      context: ./backend
+    container_name: rag-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      COLLECTION_NAME: ${COLLECTION_NAME}
+      DATA_DIR: /data/docs
+      CHUNK_SIZE: ${CHUNK_SIZE}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP}
+      TOP_K: ${TOP_K}
+      RESET_COLLECTION_ON_START: ${RESET_COLLECTION_ON_START}
+      MODEL_RUNNER_BASE_URL: ${MODEL_RUNNER_BASE_URL}
+      MODEL_RUNNER_API_KEY: ${MODEL_RUNNER_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      QUERY_MODEL: ${QUERY_MODEL}
+      ANSWER_MODEL: ${ANSWER_MODEL}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+    volumes:
+      # Mount host document directory as read-only input corpus.
+      - ${HOST_DOCS_PATH}:/data/docs:ro
+    ports:
+      - "8000:8000"
+
+  frontend:
+    # Static web UI that sends chat requests to backend.
+    build:
+      context: ./frontend
+    container_name: rag-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  # Persistent volume to keep Postgres data across container restarts.
+  pgdata:

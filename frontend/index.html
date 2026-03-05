@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local RAG Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header>
+        <h1>Local RAG Chat</h1>
+        <p>Ask questions against your local document set.</p>
+      </header>
+
+      <!-- Messages are appended here dynamically by app.js. -->
+      <section id="chat" class="chat-window" aria-live="polite"></section>
+
+      <!-- Simple single-input chat form. -->
+      <form id="chat-form" class="chat-form">
+        <input
+          id="question"
+          name="question"
+          type="text"
+          placeholder="Ask a question..."
+          autocomplete="off"
+          required
+        />
+        <button type="submit">Send</button>
+      </form>
+
+      <!-- Helpful reminder for the API endpoint used by the UI. -->
+      <p class="hint">Backend endpoint: <code>http://localhost:8000/chat</code></p>
+    </main>
+
+    <!-- Frontend behavior for posting questions and rendering replies. -->
+    <script src="/app.js" defer></script>
+  </body>
+</html>

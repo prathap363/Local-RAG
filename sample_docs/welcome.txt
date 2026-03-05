@@ -1,0 +1,7 @@
+Sample knowledge content for initial ingestion tests.
+
+This is a sample knowledge file for the local RAG application.
+
+The app uses PostgreSQL with the pgvector extension as a vector database.
+The backend uses LangChain for chunking, embedding, retrieval, and generation.
+The frontend is a simple browser-based chat user interface.

@@ -1,0 +1,118 @@
+/* Global design tokens used by the chat UI. */
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #222222;
+  --muted: #6b7280;
+  --primary: #0f766e;
+  --primary-contrast: #ffffff;
+  --border: #d1d5db;
+}
+
+* {
+  /* Use border-box sizing to make width/padding calculations predictable. */
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: radial-gradient(circle at top, #ffffff 0%, var(--bg) 55%);
+  color: var(--text);
+}
+
+.app-shell {
+  /* Main centered container for desktop and mobile. */
+  max-width: 800px;
+  margin: 24px auto;
+  padding: 20px;
+}
+
+header h1 {
+  margin: 0;
+}
+
+header p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.chat-window {
+  /* Scrollable message area. */
+  min-height: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.message {
+  /* Base message bubble style for both roles. */
+  max-width: 85%;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+
+.message.user {
+  /* User messages align right with a distinct background. */
+  margin-left: auto;
+  background: #d1fae5;
+}
+
+.message.assistant {
+  /* Assistant messages align left. */
+  margin-right: auto;
+  background: #f3f4f6;
+}
+
+.meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-form {
+  /* Input and submit button in one row. */
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.chat-form input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 16px;
+}
+
+.chat-form button {
+  border: none;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  /* Compact spacing for smaller screens. */
+  .app-shell {
+    margin: 12px;
+    padding: 12px;
+  }
+
+  .chat-window {
+    min-height: 55vh;
+  }
+}
