@@ -9,7 +9,7 @@ A minimal RAG pipeline with:
 ## How It Works
 
 1. On backend startup, files in `HOST_DOCS_PATH` are loaded.
-2. Files are split into chunks using recursive character splitting.
+2. Files are split into chunks using `CHUNKING_MODE` (`recursive` or `semantic`).
 3. Chunks are embedded and written into pgvector.
 4. During chat, the user query is rewritten for retrieval quality.
 5. Top relevant chunks are fetched and used as context for final answer generation.
@@ -22,6 +22,9 @@ Legacy `.doc` files are not supported directly; convert them to `.docx` or `.pdf
 1. Copy `.env.example` to `.env`.
 2. Set `HOST_DOCS_PATH` to your local folder containing documents.
 3. Set `MODEL_RUNNER_BASE_URL`, `EMBEDDING_MODEL`, `QUERY_MODEL`, `ANSWER_MODEL` to values supported by your local model runner.
+4. Set `CHUNKING_MODE` to choose chunking style:
+  - `recursive` (default): fixed-size overlapping chunks
+  - `semantic`: embedding-aware chunk boundaries
 
 ## 2) Start
 
@@ -55,6 +58,7 @@ curl -X POST http://localhost:8000/ingest
 - `RESET_COLLECTION_ON_START=true` re-creates the collection each backend restart.
 - To keep previously ingested vectors, set `RESET_COLLECTION_ON_START=false`.
 - If `HOST_DOCS_PATH` is a Windows path, prefer forward slashes (for example `C:/Users/name/docs`).
+- `CHUNKING_MODE=semantic` uses the configured `EMBEDDING_MODEL` to decide split boundaries.
 
 ## File Guide
 

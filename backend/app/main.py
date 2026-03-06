@@ -6,6 +6,7 @@ import unicodedata
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_experimental.text_splitter import SemanticChunker
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -47,6 +48,7 @@ class Settings(BaseSettings):
     data_dir: str
     chunk_size: int
     chunk_overlap: int
+    chunking_mode: str = "recursive"
     top_k: int
     reset_collection_on_start: bool
 
@@ -126,6 +128,7 @@ def log_loaded_settings() -> None:
     logger.info("  DATA_DIR=%s", settings.data_dir)
     logger.info("  CHUNK_SIZE=%s", settings.chunk_size)
     logger.info("  CHUNK_OVERLAP=%s", settings.chunk_overlap)
+    logger.info("  CHUNKING_MODE=%s", settings.chunking_mode)
     logger.info("  TOP_K=%s", settings.top_k)
     logger.info("  RESET_COLLECTION_ON_START=%s", settings.reset_collection_on_start)
     logger.info("  MODEL_RUNNER_BASE_URL=%s", settings.model_runner_base_url)
@@ -298,11 +301,35 @@ def load_documents(directory: str) -> list[Document]:
 
 
 def split_documents(documents: list[Document]) -> list[Document]:
-    """Split documents into overlapping chunks for vector retrieval.
+    """Split documents based on configured chunking mode.
 
-    Chunking improves semantic search quality by indexing focused text regions
-    instead of entire files.
+    Supported values for `CHUNKING_MODE`:
+    - `recursive` (default): fixed-size overlapping chunks
+    - `semantic`: embedding-aware semantic boundaries
+
+    Any invalid mode or semantic chunking failure falls back to recursive.
     """
+
+    mode = settings.chunking_mode.strip().lower()
+    if mode not in {"recursive", "semantic"}:
+        logger.warning(
+            "Unsupported CHUNKING_MODE '%s'; falling back to recursive",
+            settings.chunking_mode,
+        )
+        mode = "recursive"
+
+    if mode == "semantic":
+        if _embeddings is None:
+            logger.warning("Embeddings not initialized for semantic chunking; using recursive")
+        else:
+            try:
+                semantic_splitter = SemanticChunker(embeddings=_embeddings)
+                semantic_chunks = semantic_splitter.split_documents(documents)
+                if semantic_chunks:
+                    return semantic_chunks
+                logger.warning("Semantic chunking returned no chunks; falling back to recursive")
+            except Exception as exc:
+                logger.warning("Semantic chunking failed; falling back to recursive: %s", exc)
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
